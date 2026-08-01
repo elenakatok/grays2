@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { doc, getDoc } from 'firebase/firestore'
 import { httpsCallable } from 'firebase/functions'
 import { auth, db, rtdb, functions } from '../firebase'
-import { assignRole, confirmReady, verifyAttendanceCode, CLASSROOM_URL } from '../api'
+import { assignRole, confirmReady, verifyAttendanceCode, recordLogin, CLASSROOM_URL } from '../api'
 import {
   useStudentSession,
   KnowledgeCheck,
@@ -21,6 +21,7 @@ import {
 } from '@mygames/game-ui'
 import type { BootstrapArgs, InfoPageLink } from '@mygames/game-ui'
 import OutcomeReporting from '../phases/OutcomeReporting'
+import OnlineWaiting from '../phases/OnlineWaiting'
 import { graysConfig, graysSchema, FIELD_LABELS, formatField } from '../gameConfig'
 
 // ── Phase state ───────────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ type GamePhase =
   | { name: 'confirmation' }
   | { name: 'attendance-code' }
   | { name: 'waiting-room' }
+  | { name: 'online-waiting' }
   | { name: 'group-reveal';    groupId: string }
   | { name: 'off-platform';    groupId: string }
   | { name: 'outcome-reporting'; groupId: string; isLead: boolean }
@@ -49,7 +51,7 @@ type GetInfoUrlsResult = {
   publicLink: { label: string; url: string } | null
 }
 
-async function routeToPhase(participantId: string, gameInstanceId: string): Promise<GamePhase> {
+async function routeToPhase(participantId: string, gameInstanceId: string, clockMode: string): Promise<GamePhase> {
   const snap = await getDoc(
     doc(db, 'game_instances', gameInstanceId, 'participants', participantId),
   )
@@ -67,7 +69,22 @@ async function routeToPhase(participantId: string, gameInstanceId: string): Prom
     }
   }
 
-  // prep_status === 'complete' — Phase 2 routing
+  // ── ONLINE mode (clock_mode 'off') — no attendance code; pre-grouped pairs,
+  //    auto-start on per-role presence. Routing keys off the group status only. ──
+  if (clockMode === 'off') {
+    const groupId = d.group_id as string | undefined
+    if (!groupId) return { name: 'online-waiting' }  // pre-grouping may not have run yet
+    const gSnap = await getDoc(doc(db, 'game_instances', gameInstanceId, 'groups', groupId))
+    const status = (gSnap.data() ?? {})['status'] as string | undefined
+    if (status === 'negotiating') return { name: 'off-platform', groupId }
+    if (status === 'reporting' || status === 'deadlocked') {
+      return { name: 'outcome-reporting', groupId, isLead: d.is_lead === true }
+    }
+    if (status === 'completed')  return { name: 'results', groupId }
+    return { name: 'online-waiting' }  // 'matched' or missing → wait for both to arrive
+  }
+
+  // prep_status === 'complete' — CLASSROOM Phase 2 routing (Part 1, unchanged)
   if (!d.confirmed_ready_at)    return { name: 'hold' }
   if (!d.attendance_confirmed_at) return { name: 'confirmation' }
   if (!d.group_id)              return { name: 'waiting-room' }
@@ -162,9 +179,13 @@ export default function Play() {
     let cancelled = false
 
     const run = async () => {
+      // recordLogin stamps last_login_at and hands back clock_mode — the only way the
+      // client learns online vs classroom (config/main is server-only readable).
+      let clockMode = 'on'
+      try { clockMode = (await recordLogin({})).clock_mode } catch { /* default classroom */ }
       let p: GamePhase
       try {
-        p = await routeToPhase(participantId, gameInstanceId)
+        p = await routeToPhase(participantId, gameInstanceId, clockMode)
       } catch (err) {
         if (!cancelled) setPhase({ name: 'error', message: err instanceof Error ? err.message : 'Failed to load session.' })
         return
@@ -375,6 +396,14 @@ export default function Play() {
           rtdb={rtdb}
           onMatched={(groupId) => setPhase({ name: 'group-reveal', groupId })}
           classroomUrl={CLASSROOM_URL}
+        />
+      )}
+
+      {phase.name === 'online-waiting' && (
+        <OnlineWaiting
+          participantId={participantId}
+          gameInstanceId={gameInstanceId}
+          onOpen={(groupId) => setPhase({ name: 'off-platform', groupId })}
         />
       )}
 

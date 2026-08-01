@@ -8,6 +8,7 @@ import {
   ReportBoard,
   GameHeader,
   ExportModal,
+  AssignmentStatusReport,
   buildStudentTextExport,
   type SortableColumn,
   type ReportTileConfig,
@@ -15,6 +16,7 @@ import {
 } from '@mygames/game-ui'
 import { StubChart } from '../components/StubChart'
 import { SchemaField, parseForm, type FormValues } from '../phases/OutcomeReporting'
+import { getOnlineReport, type OnlineReport } from '../api'
 import { type OutcomeSchema } from '../gameConfig'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -227,6 +229,15 @@ export default function Reports() {
   const [contractOpen,  setContractOpen]  = useState(false)
   const [activeExport,  setActiveExport]  = useState<{ title: string; text: string } | null>(null)
 
+  // Online assignment-status report (§6) — fetched on demand.
+  const [onlineOpen,   setOnlineOpen]   = useState(false)
+  const [onlineReport, setOnlineReport] = useState<OnlineReport | null>(null)
+  const [onlineErr,    setOnlineErr]    = useState<string | null>(null)
+  const openOnline = () => {
+    setOnlineOpen(true); setOnlineErr(null)
+    getOnlineReport().then(setOnlineReport).catch(e => setOnlineErr(e instanceof Error ? e.message : 'Failed to load report.'))
+  }
+
   // ── Tile config (Reports_Contract_v1) ────────────────────────────────────────
   const finalized = rows?.length ?? 0
 
@@ -273,6 +284,16 @@ export default function Reports() {
       onOpen: () => {},
       disabled: true,
       actionLabel: 'Part 3',
+    },
+    // Online (Part 2) — assignment-status report: who arrived, who was flagged, what was done.
+    {
+      id: 'assignment-status',
+      title: 'Assignment Status — online (arrivals & flags)',
+      preview: <span style={{ fontSize: '0.85rem', color: '#555' }}>
+        Who arrived, who flagged &ldquo;can&apos;t reach my group&rdquo;, group progress.
+      </span>,
+      onOpen: openOnline,
+      actionLabel: 'Open ↗',
     },
   ]
 
@@ -428,6 +449,45 @@ export default function Reports() {
           text={activeExport.text}
           onClose={() => setActiveExport(null)}
         />
+      )}
+
+      {/* ── Online assignment-status report modal (§6) ── */}
+      {onlineOpen && (
+        <div
+          onClick={() => setOnlineOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+            padding: '3rem 1rem', zIndex: 1000, overflowY: 'auto',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+              width: '100%', maxWidth: 'min(1000px, calc(100vw - 2rem))', minWidth: 0,
+              boxSizing: 'border-box', maxHeight: 'calc(100vh - 6rem)', overflowY: 'auto',
+              padding: '1.25rem 1.5rem',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Assignment Status — online</h3>
+              <button onClick={() => setOnlineOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer', color: '#666' }}>✕</button>
+            </div>
+            {onlineErr && <p style={{ color: '#c00' }}>{onlineErr}</p>}
+            {!onlineReport && !onlineErr && <p style={{ color: '#888' }}>Loading…</p>}
+            {onlineReport && (
+              <AssignmentStatusReport
+                groups={onlineReport.groups}
+                students={onlineReport.students}
+                counts={onlineReport.counts}
+                absenceLabel={onlineReport.absence_label}
+                arrivalDataPresent={onlineReport.arrival_data_present}
+              />
+            )}
+          </div>
+        </div>
       )}
     </div>
   )

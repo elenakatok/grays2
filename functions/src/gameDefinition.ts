@@ -110,6 +110,14 @@ export const graysGameDef: GameDefinition = {
     { key: 'kelly_reservation_price', kind: 'positiveInt', default: KELLY_RESERVATION_DEFAULT },
     { key: 'chris_sheet_url',        kind: 'url',         default: '/role-info/chris.pdf' },
     { key: 'kelly_sheet_url',        kind: 'url',         default: '/role-info/kelly.pdf' },
+    // ── Online mode (Part 2) ──────────────────────────────────────────────────
+    // clock_mode: 'on' = classroom (attendance code + match-on-the-spot), 'off' = online
+    // (pre-grouped pairs, auto-start on per-role presence). The student UI's only way to
+    // learn the mode (config/main is server-only readable) — recordLogin hands it back.
+    { key: 'clock_mode',       kind: 'string', default: 'on' },
+    // Instructor email for the "I can't reach my group" mailto. A MANUAL override that
+    // WINS over the course-owner address synced at roster sync (Online_Matching_Spec §4.6).
+    { key: 'instructor_email', kind: 'string', default: '' },
   ],
 
   // Info page links — keys match configFields above (STUB targets).

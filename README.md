@@ -10,18 +10,30 @@ Spawned **from Winemaster** (the canonical 2-role negotiation reference) per
 `Game_Scaffold_Spec_v1.md` **Part 1**. The existing `grays-com` game is a **separate,
 frozen** game and is not related to this codebase.
 
-## Build status — Part 1 (blank canvas)
+## Build status — Part 1 (blank canvas) + Part 2 (online mode)
 
-This is the **Part 1 blank canvas**: everything is wired to the shared libraries and a
-full **classroom** play-through works end-to-end, but **all content is placeholder**
-(stub KC/prep/debrief text, a single stub `price` outcome field, a placeholder surplus
-scoring formula). Part 2 drops the easy data (real role names, reservation prices, info
-docs, KC); Part 3 supplies the real contract-form fields and per-role scoring formula.
+**Part 1** wired everything to the shared libraries with **placeholder content** (stub
+KC/prep/debrief text, a single stub `price` outcome field, a placeholder surplus scoring
+formula) and a full **classroom** play-through. Part 3 supplies the real contract-form
+fields and per-role scoring formula. Content is still placeholder.
 
-**Classroom-only.** No online mode, no Classroom/Online toggle, no Groups panel / move
-+ ungroup mount — those are Part 2. The move/ungroup substrate is already inherited from
-the pinned shared packages (`game-server v0.28.0`, `game-ui 0.34.0` which exports
-`GroupsControlPanel`); Part 2 just mounts it.
+**Part 2 adds the instructor-toggled ONLINE mode** (Online_Matching_Spec_v1 + the grays
+role-at-grouping design):
+
+- **Mode switch** (Classroom / Online) on the dashboard; `clock_mode` config field.
+- **Roles assigned AT grouping** — the instructor pre-groups the roster into Chris/Kelly
+  pairs (first seat → Chris/lead, second → Kelly). Grays is the first negotiation
+  consumer of the shared `makeNegotiationGroupAdapter`.
+- **Per-ROLE auto-start** — a group opens the moment ≥1 Chris AND ≥1 Kelly are present
+  (never a seat headcount; a 2-Chris/0-Kelly group can never start).
+- **Incomplete-group advisory** — a roll-up + per-group missing-role notice (⚠ No Kelly /
+  ⚠ No Chris). INFORM, never block. Doubling-up (2 Chris + 1 Kelly) is legal and silent.
+- **"I can't reach my group"** flag (mailto only) + the assignment-status report (§6).
+- **Lock at first play** — a started group is frozen for moves (the shared per-group lock).
+- **NO bots** — a bot cannot hold a role's private information and negotiate.
+
+Classroom mode (Part 1) is byte-behavior-identical; the mode switch is the only addition.
+The move/ungroup panel is the shared `GroupsControlPanel` (mounted in online mode only).
 
 ## Shared library pins
 

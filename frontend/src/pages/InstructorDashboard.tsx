@@ -3,6 +3,7 @@ import { httpsCallable } from 'firebase/functions'
 import { InstructorDashboard as SharedDashboard, type DeadlockResolutionProps, type OutcomeFields } from '@mygames/game-ui'
 import { auth, functions, rtdb } from '../firebase'
 import { graysConfig } from '../gameConfig'
+import OnlineControls from './OnlineControls'
 
 // ── Role labels from game config ──────────────────────────────────────────────
 
@@ -76,6 +77,7 @@ export default function InstructorDashboard() {
       settingsRoute="/settings"
       reportsRoute="/reports"
       scoreAndRecord={{ callableName: 'scoreAndRecord', label: 'Score & Record' }}
+      underHeadline={<OnlineControls />}
     />
   )
 }

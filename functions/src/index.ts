@@ -69,6 +69,20 @@ export { getReportData } from './getReportData'
 export { updateGroupContract } from './updateGroupContract'
 export { scoreAndRecord } from './scoreAndRecord'
 
+// ── ONLINE MODE (Part 2) ──────────────────────────────────────────────────────
+// Instructor-toggled online mode (clock_mode 'off'). Pre-grouped Chris/Kelly pairs,
+// per-role auto-start, the "can't reach my group" flag, and the assignment report.
+// Wires the shared negotiation online/seat machinery; NO bots (negotiation game).
+export {
+  groupParticipantsOnline,  // instructor: pre-match roster → Chris/Kelly pairs
+  recordOnlineArrival,      // student: mark present + per-role auto-open
+  recordLogin,              // student: login stamp + clock_mode for UI routing
+  moveSeat,                 // instructor: move / ungroup (the shared panel's control)
+  getOnlineGroups,          // instructor: online groups + No-Group pool
+  flagGroup,                // student: "I can't reach my group" (mailto + passive flag)
+  getOnlineReport,          // instructor: assignment-status report (§6)
+} from './online'
+
 // ── Non-game onRequest endpoints ──────────────────────────────────────────────
 
 const CORS_ORIGINS = new Set(['https://grays2.mygames.live'])

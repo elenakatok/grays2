@@ -117,3 +117,56 @@ export const finalizeInstance = () =>
 
 export const pushResultsToClassroom = () =>
   callFn<{ ok: boolean } & PushSummary>('pushResultsToClassroom', {})
+
+// ── Online mode (Part 2) ──────────────────────────────────────────────────────
+
+export type GameConfig = { ok: boolean; clock_mode?: string; instructor_email?: string; [k: string]: unknown }
+
+/** Instructor: read the config (for the clock_mode toggle state). */
+export const getGameConfig = () => callFn<GameConfig>('getGameConfig', {})
+
+/** Instructor: flip classroom ('on') / online ('off') mode. */
+export const setClockMode = (mode: 'on' | 'off') =>
+  callFn<GameConfig>('updateGameConfig', { clock_mode: mode })
+
+/** Instructor: pre-match the whole roster into Chris/Kelly pairs (online mode). */
+export const groupParticipantsOnline = () =>
+  callFn<{ ok: boolean; groups: number; full_pairs: number; short_group_size: number | null; total_humans: number }>(
+    'groupParticipantsOnline', {})
+
+/** Student: mark present in the online waiting room + trigger per-role auto-open. */
+export const recordOnlineArrival = (args: CallArgs) =>
+  callFn<{ ok: boolean; clock_mode: string; group_id: string | null; status: string | null; opened: boolean }>(
+    'recordOnlineArrival', args)
+
+/** Student: login stamp; returns clock_mode so the UI routes online vs classroom. */
+export const recordLogin = (args: CallArgs) =>
+  callFn<{ ok: boolean; group_id: string | null; clock_mode: string }>('recordLogin', args)
+
+/** Student: "I can't reach my group" — raises the passive flag, returns the mailto facts. */
+export const flagGroup = (args: CallArgs) =>
+  callFn<{ ok: boolean; group_number: number; instructor_email: string | null; already_flagged?: boolean }>(
+    'flagGroup', args)
+
+// The assignment-status report shape (Online_Matching_Spec §6) — straight to the shared tile.
+export type OnlineReport = {
+  ok: boolean
+  absence_label: string
+  arrival_data_present: boolean
+  counts: { finished: number; inProgress: number; neverStarted: number; flagged: number }
+  groups: {
+    groupId: string; groupNumber: number
+    category: 'finished' | 'in_progress' | 'never_started'
+    humanCount: number; botCount: number
+    flagged: boolean; flagStale: boolean; reporterName: string | null; rounds: number
+  }[]
+  students: {
+    participantId: string; name: string; groupNumber: number | null
+    category: 'finished' | 'in_progress' | 'never_started' | 'no_group'
+    arrived: boolean | null; lastLoginMs: number | null
+    flagged: boolean; playedWithBots: boolean; absences: number; rounds: number | null
+  }[]
+}
+
+/** Instructor: the assignment-status report. */
+export const getOnlineReport = () => callFn<OnlineReport>('getOnlineReport', {})
