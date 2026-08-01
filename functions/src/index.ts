@@ -81,7 +81,7 @@ export const health = onRequest((req, res) => {
     res.set('Vary', 'Origin')
   }
   if (req.method === 'OPTIONS') { res.status(204).send(''); return }
-  res.json({ ok: true, game: 'grays_v2' })
+  res.json({ ok: true, game: 'grays2' })
 })
 
 // Emulator-only dev seed functions — onRequest, not game endpoints.

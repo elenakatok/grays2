@@ -87,7 +87,7 @@ export function computeRawScore(roleKey: string, outcome: Outcome | null, config
 // ── GameDefinition (full contract for game-server factories) ─────────────────
 
 export const graysGameDef: GameDefinition = {
-  game_id: 'grays_v2',
+  game_id: 'grays2',
   roles:   graysConfig,
   scoreSense: graysScoreSense,
   composition: { chris: 1, kelly: 1 },  // symmetric, one student per role
