@@ -201,6 +201,16 @@ export const graysGameDef: GameDefinition = {
       prompt: 'What was the first price proposed in the negotiation, and who proposed it?',
       placeholder: '', order: 20, hidden: false, deletable: true,
     },
+    // Numeric opening offer — the x-axis of the "final price vs. initial offer" regression
+    // (grays.com report parity). Captured via the shared debrief text field (a plain
+    // textarea) and parsed to a number server-side in getReportData, so no shared-package
+    // change is needed. format:'number' keeps it OUT of the free-text Tier-2 tiles.
+    {
+      field: 'debrief_initial_offer', type: 'number', system: false,
+      category: 'debrief', format: 'number', role_target: 'all',
+      prompt: 'As a number, what was the first price (in US dollars) put on the table? Enter digits only — for example, 150000.',
+      placeholder: 'e.g. 150000', order: 21, hidden: false, deletable: false,
+    },
   ],
 
   content: {

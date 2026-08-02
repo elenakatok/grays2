@@ -15,9 +15,18 @@ import {
   type AiTextRow,
 } from '@mygames/game-ui'
 import { PriceDistribution, type PriceDeal } from '../components/PriceDistribution'
+import {
+  PriceHistogramSVG,
+  ScatterPlotSVG,
+  DualPrepHistSVG,
+  type ReportGroup,
+  type ReportParticipant,
+  type ChartConfig,
+} from '../components/NegotiationCharts'
 import { SchemaField, parseForm, type FormValues } from '../phases/OutcomeReporting'
 import { getOnlineReport, type OnlineReport } from '../api'
 import { type OutcomeSchema } from '../gameConfig'
+import type { ReactNode } from 'react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -155,6 +164,8 @@ export default function Reports() {
   const [questions, setQuestions] = useState<QuestionMeta[]>([])
   const [schema,    setSchema]    = useState<OutcomeSchema | null>(null)
   const [reservations, setReservations] = useState<Reservations>({ chris: 25_000, kelly: 475_000 })
+  const [groups,       setGroups]       = useState<ReportGroup[] | null>(null)
+  const [participants, setParticipants] = useState<ReportParticipant[] | null>(null)
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
 
@@ -162,12 +173,14 @@ export default function Reports() {
     if (!sessionReady) return
     setLoading(true)
     setError(null)
-    const fn = httpsCallable<object, { ok: boolean; rows: ReportRow[]; questions: QuestionMeta[]; schema: OutcomeSchema; reservations: Reservations }>(functions, 'getReportData')
+    const fn = httpsCallable<object, { ok: boolean; rows: ReportRow[]; questions: QuestionMeta[]; schema: OutcomeSchema; reservations: Reservations; groups: ReportGroup[]; participants: ReportParticipant[] }>(functions, 'getReportData')
     fn({}).then(r => {
       setRows(r.data.rows)
       setQuestions(r.data.questions)
       setSchema(r.data.schema)
       if (r.data.reservations) setReservations(r.data.reservations)
+      setGroups(r.data.groups ?? [])
+      setParticipants(r.data.participants ?? [])
       setLoading(false)
     }).catch((err: unknown) => {
       setError(err instanceof Error ? err.message : 'Failed to load report data.')
@@ -226,6 +239,13 @@ export default function Reports() {
   const [contractOpen,  setContractOpen]  = useState(false)
   const [chartOpen,     setChartOpen]     = useState(false)
   const [activeExport,  setActiveExport]  = useState<{ title: string; text: string } | null>(null)
+  // One generic modal for the full-size grays.com-parity SVG charts.
+  const [bigChart,      setBigChart]      = useState<{ title: string; content: ReactNode } | null>(null)
+
+  const chartConfig: ChartConfig = {
+    reservation_price_chris: reservations.chris,
+    reservation_price_kelly: reservations.kelly,
+  }
 
   // ── Tier-3 price distribution — one point per group (deals) + walk-away list ──
   const { deals, walkaways } = (() => {
@@ -271,6 +291,48 @@ export default function Reports() {
       disabled: !rows || rows.length === 0,
       actionLabel: 'Open ↗',
     },
+    // ── grays.com report parity — Outcomes charts ──
+    {
+      id: 'price-histogram',
+      title: 'Price Distribution — Agreed Final Prices',
+      preview: !groups
+        ? <span style={{ color: '#888', fontSize: '0.85rem' }}>{loading ? 'Loading…' : 'No data'}</span>
+        : <div style={{ pointerEvents: 'none' }}><PriceHistogramSVG groups={groups} config={chartConfig} /></div>,
+      onOpen: () => { if (groups) setBigChart({ title: 'Price Distribution — Agreed Final Prices', content: <PriceHistogramSVG groups={groups} config={chartConfig} /> }) },
+      disabled: !groups || groups.length === 0,
+      actionLabel: 'Open ↗',
+    },
+    {
+      id: 'regression',
+      title: 'Regression — Final Price vs. Initial Offer',
+      preview: !groups
+        ? <span style={{ color: '#888', fontSize: '0.85rem' }}>{loading ? 'Loading…' : 'No data'}</span>
+        : <div style={{ pointerEvents: 'none' }}><ScatterPlotSVG groups={groups} /></div>,
+      onOpen: () => { if (groups) setBigChart({ title: 'Regression — Final Price vs. Initial Offer', content: <ScatterPlotSVG groups={groups} /> }) },
+      disabled: !groups || groups.length === 0,
+      actionLabel: 'Open ↗',
+    },
+    // ── grays.com report parity — Preparation charts (Seller | Buyer) ──
+    {
+      id: 'prep-planned-offer',
+      title: 'Planned First Offer — where did students plan to open?',
+      preview: !participants
+        ? <span style={{ color: '#888', fontSize: '0.85rem' }}>{loading ? 'Loading…' : 'No data'}</span>
+        : <div style={{ pointerEvents: 'none' }}><DualPrepHistSVG participants={participants} config={chartConfig} field="prep_planned_first_offer" title="Planned First Offer" /></div>,
+      onOpen: () => { if (participants) setBigChart({ title: 'Planned First Offer', content: <DualPrepHistSVG participants={participants} config={chartConfig} field="prep_planned_first_offer" title="Planned First Offer" /> }) },
+      disabled: !participants || participants.length === 0,
+      actionLabel: 'Open ↗',
+    },
+    {
+      id: 'prep-estimated-other',
+      title: "Estimated Other's Reservation Price — how well did students estimate the walk-away?",
+      preview: !participants
+        ? <span style={{ color: '#888', fontSize: '0.85rem' }}>{loading ? 'Loading…' : 'No data'}</span>
+        : <div style={{ pointerEvents: 'none' }}><DualPrepHistSVG participants={participants} config={chartConfig} field="prep_estimated_other_price" title="Estimated Other's Reservation Price" /></div>,
+      onOpen: () => { if (participants) setBigChart({ title: "Estimated Other's Reservation Price", content: <DualPrepHistSVG participants={participants} config={chartConfig} field="prep_estimated_other_price" title="Estimated Other's Reservation Price" /> }) },
+      disabled: !participants || participants.length === 0,
+      actionLabel: 'Open ↗',
+    },
     // Tier 2 — one tile PER free-text question (prep + debrief). Driven by config;
     // role_target 'all' → aggregate every student's answer. Text is placeholder (Part 2).
     ...questions.map(q => {
@@ -292,6 +354,27 @@ export default function Reports() {
         actionLabel: 'Open ↗',
       } satisfies ReportTileConfig
     }),
+    // Debrief Reflections — class-wide AI-analysis export (grays.com parity). The shared
+    // Results screen always captures debrief_reflection, so every group member has one.
+    (() => {
+      const title = 'Debrief Reflections — export for AI analysis'
+      const refRows: AiTextRow[] = (participants ?? [])
+        .filter(p => p.debrief_reflection)
+        .map(p => ({ name: p.display_name, raw_score: null, answer: p.debrief_reflection! }))
+      const text = buildStudentTextExport(title, refRows)
+      return {
+        id: 'debrief-reflections',
+        title,
+        preview: refRows.length === 0
+          ? <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>No reflections yet.</span>
+          : <span style={{ fontSize: '1.25rem', fontWeight: 700, color: '#111' }}>
+              {refRows.length} reflection{refRows.length !== 1 ? 's' : ''}
+            </span>,
+        onOpen: () => setActiveExport({ title, text }),
+        disabled: !participants,
+        actionLabel: 'Open ↗',
+      } satisfies ReportTileConfig
+    })(),
     // Tier 3 — price-distribution chart (spec §4.5): final prices across groups.
     {
       id: 'price-distribution',
@@ -424,6 +507,24 @@ export default function Reports() {
             </p>
             <PriceDistribution deals={deals} walkaways={walkaways}
               reservationChris={reservations.chris} reservationKelly={reservations.kelly} />
+          </div>
+        </div>
+      )}
+
+      {/* ── Full-size chart modal (grays.com-parity SVG charts) ── */}
+      {bigChart && (
+        <div onClick={() => setBigChart(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.6)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 1050, overflowY: 'auto' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 10, boxShadow: '0 12px 60px rgba(0,0,0,0.5)',
+              width: '100%', maxWidth: 'min(1180px, calc(100vw - 2rem))', boxSizing: 'border-box', padding: '1rem 1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>{bigChart.title}</h3>
+              <button onClick={() => setBigChart(null)}
+                style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer', color: '#666' }}>✕</button>
+            </div>
+            {bigChart.content}
           </div>
         </div>
       )}
