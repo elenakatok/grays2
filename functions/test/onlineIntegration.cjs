@@ -16,7 +16,11 @@ process.env.FIRESTORE_EMULATOR_HOST = 'localhost:8092'
 process.env.FIREBASE_DATABASE_EMULATOR_HOST = 'localhost:9012'
 
 const admin = require('firebase-admin')
-admin.initializeApp({ projectId: PROJECT, databaseURL: `http://localhost:9012?ns=${PROJECT}` })
+// RTDB reads (attendingOf) must target the SAME namespace the FUNCTIONS runtime writes to.
+// The functions' admin.initializeApp() (no databaseURL) defaults to `<project>-default-rtdb`
+// under the emulator — matching production, where there is one default database. The test
+// admin must use that ns too, or it reads an empty sibling namespace.
+admin.initializeApp({ projectId: PROJECT, databaseURL: `http://localhost:9012?ns=${PROJECT}-default-rtdb` })
 const db = admin.firestore()
 const BASE = `http://localhost:5015/${PROJECT}/us-central1`
 
@@ -50,6 +54,7 @@ async function seedRoster(gid, people) {
   }
   await b.commit()
 }
+const attendingOf = async (gid, pid) => (await admin.database().ref(`attending/${gid}/${pid}`).get()).val()
 const group = async (gid, groupId) => (await db.collection('game_instances').doc(gid).collection('groups').doc(groupId).get()).data()
 const groupsOf = async (gid) => (await db.collection('game_instances').doc(gid).collection('groups').get()).docs.map(d => ({ id: d.id, ...d.data() }))
 const partOf = async (gid, pid) => (await db.collection('game_instances').doc(gid).collection('participants').doc(pid).get()).data()
@@ -220,6 +225,29 @@ async function testReport() {
   ok('one student marked arrived, others not', rep.students.filter(s => s.arrived === true).length === 1)
 }
 
+// ── 8. Name overlay: online grouping seeds RTDB `attending` (fixes partner-shows-id) ──
+// In online mode the classroom attendance step never runs, yet the shared group-member
+// panel resolves names ONLY from RTDB `attending`. Grouping + arrival must seed it, or a
+// partner shows as a raw participant-id code.
+async function testAttendingOverlay() {
+  console.log('\n8. RTDB `attending` name overlay (online partner shows a real name, not an id)')
+  const gid = `og_attend_${Date.now()}`
+  await seedRoster(gid, [
+    { id: 'p1', name: 'Ann Adams', email: 'ann@x.edu' }, { id: 'p2', name: 'Bo Baker', email: 'bo@x.edu' },
+  ])
+  await call('groupParticipantsOnline', dev(gid))
+  const [a1, a2] = await Promise.all([attendingOf(gid, 'p1'), attendingOf(gid, 'p2')])
+  ok('grouping seeds attending[p1].display_name = "Ann Adams"', a1 && a1.display_name === 'Ann Adams')
+  ok('grouping seeds attending[p2].display_name = "Bo Baker"', a2 && a2.display_name === 'Bo Baker')
+  // Arrival re-hydrates the overlay for BOTH members (mirrors members[]).
+  const [g] = await groupsOf(gid)
+  const chris = g.chris_participants[0]
+  await call('recordOnlineArrival', stu(chris, gid))
+  const after = await attendingOf(gid, chris)
+  ok('arrival keeps a real display_name (never the participant-id)',
+    after && typeof after.display_name === 'string' && after.display_name !== chris && after.display_name.length > 0)
+}
+
 async function main() {
   console.log('\n═══ GRAYS 2.0 ONLINE-MODE integration ═══')
   await testPreGroup()
@@ -229,6 +257,7 @@ async function main() {
   await testMergeCompletes()
   await testLockAndFlag()
   await testReport()
+  await testAttendingOverlay()
   console.log(`\n═══ ${passed}/${passed + failed} checks passed ═══\n`)
   process.exit(failed === 0 ? 0 : 1)
 }

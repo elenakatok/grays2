@@ -130,6 +130,22 @@ const memberEntry = (id: string, d: Record<string, unknown>, role: string): Memb
   participant_id: id, display_name: displayNameOf(d, id), email: emailOf(d), is_bot: false, role,
 })
 
+/**
+ * Mirror display names into the RTDB `attending` overlay. ONLINE mode never runs the
+ * classroom attendance step (verifyAttendanceCode), which is the ONLY writer of that
+ * overlay — yet the shared group-member panel (useGroupMembers) resolves names SOLELY
+ * from `attending`, falling back to the raw participant-id. Without this, a partner shows
+ * as a scary id code even though the group doc's members[] already carries the real name.
+ * Admin-only node; keyed pid → { display_name }, the exact shape getRoster + useGroupMembers
+ * expect. Idempotent, name-only, so a re-group / move can never make it stale.
+ */
+async function writeAttendingOverlay(iid: string, members: readonly MemberEntry[]): Promise<void> {
+  if (!members.length) return
+  const updates: Record<string, unknown> = {}
+  for (const m of members) updates[`attending/${iid}/${m.participant_id}`] = { display_name: m.display_name }
+  await admin.database().ref().update(updates)
+}
+
 async function requireOnline(iid: string): Promise<void> {
   const cfg = await instanceRef(iid).collection('config').doc('main').get()
   if (String(cfg.data()?.['clock_mode'] ?? 'on') !== 'off') {
@@ -178,6 +194,7 @@ export const groupParticipantsOnline = onCall(cors, async (request) => {
   for (const g of groupsSnap.docs) batch.delete(g.ref)  // re-run: drop prior groups
 
   const created: { group_id: string; size: number }[] = []
+  const allMembers: MemberEntry[] = []
   for (const pair of pairs) {
     const groupId = randomUUID()
     // seat 0 → chris (lead), seat 1 → kelly.
@@ -207,9 +224,15 @@ export const groupParticipantsOnline = onCall(cors, async (request) => {
         display_name: m.display_name,
       })
     }
+    allMembers.push(...members)
     created.push({ group_id: groupId, size: pair.length })
   }
   await batch.commit()
+
+  // Seed the RTDB name overlay so the shared group panel resolves real names in online
+  // mode (see writeAttendingOverlay) — the classroom attendance step that normally seeds
+  // it never runs here. Best-effort: a cosmetic overlay must never fail the grouping.
+  await writeAttendingOverlay(gameInstanceId, allMembers).catch(() => { /* names fall back to members[] */ })
 
   const short = created.find(g => g.size < PAIR_SIZE)
   return {
@@ -278,8 +301,13 @@ export const recordOnlineArrival = onCall(cors, async (request) => {
     if (shouldOpen) { patch['status'] = 'negotiating'; patch['negotiation_started_at'] = FieldValue.serverTimestamp() }
     tx.update(gRef, patch)
 
-    return { status: shouldOpen ? 'negotiating' : status, opened: shouldOpen }
+    return { status: shouldOpen ? 'negotiating' : status, opened: shouldOpen, members }
   })
+
+  // Refresh the RTDB name overlay from the re-hydrated members (mirrors members[]), so a
+  // partner's name resolves on the shared panel even if grouping predated this login and
+  // stays correct through instructor moves. Best-effort — cosmetic.
+  await writeAttendingOverlay(gameInstanceId, result.members ?? []).catch(() => { /* names fall back to members[] */ })
 
   return { ok: true as const, clock_mode: clockMode, group_id: groupId, status: result.status, opened: result.opened }
 })
