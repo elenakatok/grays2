@@ -14,7 +14,7 @@ import {
   type ReportTileConfig,
   type AiTextRow,
 } from '@mygames/game-ui'
-import { StubChart } from '../components/StubChart'
+import { PriceDistribution, type PriceDeal } from '../components/PriceDistribution'
 import { SchemaField, parseForm, type FormValues } from '../phases/OutcomeReporting'
 import { getOnlineReport, type OnlineReport } from '../api'
 import { type OutcomeSchema } from '../gameConfig'
@@ -27,32 +27,28 @@ type ReportRow = {
   group_number: number | null
   group_id: string | null
   role: string
-  price: number | null           // STUB outcome measure (Part 3 → real fields)
-  value_or_cost: number | null
-  raw_score: number | null
+  price: number | null                 // agreed price (null on walk-away)
+  agreement_reached: boolean | null
+  surplus: number | null               // net profit = raw_score
+  normalized_score: number | null
+  knowledge_check_score: number | null
   text_answers: Record<string, string>
-  notes: string | null
 }
 
 type QuestionMeta = { field: string; prompt: string; role_target: string }
+type Reservations = { chris: number; kelly: number }
 
-// ── Contract-outcome table columns (Tier 1) ──────────────────────────────────
+// ── Outcomes-roster table columns (Tier 1) ────────────────────────────────────
 
-type SortKey = 'name' | 'group' | 'role' | 'price' | 'value_or_cost' | 'raw_score' | 'notes' | 'edit'
+type SortKey = 'name' | 'group' | 'role' | 'price' | 'surplus' | 'normalized' | 'kc' | 'edit'
 
 const ROLE_LABELS: Record<string, string> = {
-  chris: 'Chris',
-  kelly: 'Kelly',
+  chris: 'Chris (Seller)',
+  kelly: 'Kelly (Buyer)',
 }
 
-function fmt(n: number | null): string {
-  return n == null ? '—' : n.toLocaleString('en-US')
-}
-
-function fmtSigned(n: number | null): string {
-  if (n == null) return '—'
-  return (n >= 0 ? '+' : '−') + Math.abs(n).toLocaleString('en-US')
-}
+const money = (n: number | null): string =>
+  n == null ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
 
 const COLUMNS: readonly SortableColumn<ReportRow, SortKey>[] = [
   {
@@ -73,29 +69,28 @@ const COLUMNS: readonly SortableColumn<ReportRow, SortKey>[] = [
   {
     key: 'price', label: 'Price', nullsLast: true, isNull: r => r.price === null,
     tiebreak: (a, b) => a.display_name.localeCompare(b.display_name),
-    render: r => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(r.price)}</span>,
+    render: r => r.price == null
+      ? <span style={{ color: '#92400e' }}>No deal</span>
+      : <span style={{ fontVariantNumeric: 'tabular-nums' }}>{money(r.price)}</span>,
     compare: (a, b) => (a.price ?? 0) - (b.price ?? 0),
   },
   {
-    key: 'value_or_cost', label: 'Value / Cost', nullsLast: true, isNull: r => r.value_or_cost === null,
+    key: 'surplus', label: 'Surplus (raw)', nullsLast: true, isNull: r => r.surplus === null,
     tiebreak: (a, b) => a.display_name.localeCompare(b.display_name),
-    render: r => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(r.value_or_cost)}</span>,
-    compare: (a, b) => (a.value_or_cost ?? 0) - (b.value_or_cost ?? 0),
+    render: r => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{money(r.surplus)}</span>,
+    compare: (a, b) => (a.surplus ?? 0) - (b.surplus ?? 0),
   },
   {
-    key: 'raw_score', label: 'Raw score', nullsLast: true, isNull: r => r.raw_score === null,
+    key: 'normalized', label: 'Normalized (z)', nullsLast: true, isNull: r => r.normalized_score === null,
     tiebreak: (a, b) => a.display_name.localeCompare(b.display_name),
-    render: r => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtSigned(r.raw_score)}</span>,
-    compare: (a, b) => (a.raw_score ?? 0) - (b.raw_score ?? 0),
+    render: r => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{r.normalized_score == null ? '—' : r.normalized_score.toFixed(2)}</span>,
+    compare: (a, b) => (a.normalized_score ?? 0) - (b.normalized_score ?? 0),
   },
   {
-    key: 'notes', label: 'Notes', headerStyle: { minWidth: 80 },
-    nullsLast: true, isNull: r => !r.notes || !r.notes.trim(),
+    key: 'kc', label: 'KC', nullsLast: true, isNull: r => r.knowledge_check_score === null,
     tiebreak: (a, b) => a.display_name.localeCompare(b.display_name),
-    render: r => (r.notes && r.notes.trim())
-      ? <span style={{ whiteSpace: 'pre-wrap', display: 'inline-block', maxWidth: 220, overflowWrap: 'anywhere' }}>{r.notes}</span>
-      : '—',
-    compare: (a, b) => (a.notes ?? '').localeCompare(b.notes ?? ''),
+    render: r => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{r.knowledge_check_score == null ? '—' : r.knowledge_check_score.toFixed(1)}</span>,
+    compare: (a, b) => (a.knowledge_check_score ?? 0) - (b.knowledge_check_score ?? 0),
   },
 ]
 
@@ -159,6 +154,7 @@ export default function Reports() {
   const [rows,      setRows]      = useState<ReportRow[] | null>(null)
   const [questions, setQuestions] = useState<QuestionMeta[]>([])
   const [schema,    setSchema]    = useState<OutcomeSchema | null>(null)
+  const [reservations, setReservations] = useState<Reservations>({ chris: 25_000, kelly: 475_000 })
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
 
@@ -166,11 +162,12 @@ export default function Reports() {
     if (!sessionReady) return
     setLoading(true)
     setError(null)
-    const fn = httpsCallable<object, { ok: boolean; rows: ReportRow[]; questions: QuestionMeta[]; schema: OutcomeSchema }>(functions, 'getReportData')
+    const fn = httpsCallable<object, { ok: boolean; rows: ReportRow[]; questions: QuestionMeta[]; schema: OutcomeSchema; reservations: Reservations }>(functions, 'getReportData')
     fn({}).then(r => {
       setRows(r.data.rows)
       setQuestions(r.data.questions)
       setSchema(r.data.schema)
+      if (r.data.reservations) setReservations(r.data.reservations)
       setLoading(false)
     }).catch((err: unknown) => {
       setError(err instanceof Error ? err.message : 'Failed to load report data.')
@@ -227,7 +224,26 @@ export default function Reports() {
 
   // ── Modal state ────────────────────────────────────────────────────────────
   const [contractOpen,  setContractOpen]  = useState(false)
+  const [chartOpen,     setChartOpen]     = useState(false)
   const [activeExport,  setActiveExport]  = useState<{ title: string; text: string } | null>(null)
+
+  // ── Tier-3 price distribution — one point per group (deals) + walk-away list ──
+  const { deals, walkaways } = (() => {
+    const byGroup = new Map<number, { price: number | null; agreement: boolean }>()
+    for (const r of rows ?? []) {
+      if (r.group_number == null) continue
+      if (!byGroup.has(r.group_number)) {
+        byGroup.set(r.group_number, { price: r.price, agreement: r.agreement_reached !== false && r.price != null })
+      }
+    }
+    const deals: PriceDeal[] = []
+    const walkaways: number[] = []
+    for (const [gn, v] of [...byGroup.entries()].sort((a, b) => a[0] - b[0])) {
+      if (v.agreement && v.price != null) deals.push({ groupNumber: gn, price: v.price })
+      else walkaways.push(gn)
+    }
+    return { deals, walkaways }
+  })()
 
   // Online assignment-status report (§6) — fetched on demand.
   const [onlineOpen,   setOnlineOpen]   = useState(false)
@@ -261,7 +277,7 @@ export default function Reports() {
       const tileTitle = q.prompt
       const qRows: AiTextRow[] = (rows ?? [])
         .filter(r => (q.role_target === 'all' || r.role === q.role_target) && r.text_answers[q.field])
-        .map(r => ({ name: r.display_name, raw_score: r.raw_score, answer: r.text_answers[q.field] }))
+        .map(r => ({ name: r.display_name, raw_score: r.surplus, answer: r.text_answers[q.field] }))
       const text = buildStudentTextExport(tileTitle, qRows)
       return {
         id: q.field,
@@ -276,14 +292,19 @@ export default function Reports() {
         actionLabel: 'Open ↗',
       } satisfies ReportTileConfig
     }),
-    // Tier 3 — game-specific chart (STUB; Part 3 builds the price distribution).
+    // Tier 3 — price-distribution chart (spec §4.5): final prices across groups.
     {
-      id: 'price-distribution-stub',
-      title: 'Price Distribution — Chris vs Kelly (Part 3)',
-      preview: <StubChart />,
-      onOpen: () => {},
-      disabled: true,
-      actionLabel: 'Part 3',
+      id: 'price-distribution',
+      title: 'Price Distribution — final prices across groups',
+      preview: deals.length === 0
+        ? <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>No deals to plot yet.</span>
+        : <div style={{ pointerEvents: 'none' }}>
+            <PriceDistribution deals={deals} walkaways={walkaways}
+              reservationChris={reservations.chris} reservationKelly={reservations.kelly} />
+          </div>,
+      onOpen: () => setChartOpen(true),
+      disabled: deals.length === 0 && walkaways.length === 0,
+      actionLabel: 'Open ↗',
     },
     // Online (Part 2) — assignment-status report: who arrived, who was flagged, what was done.
     {
@@ -380,6 +401,29 @@ export default function Reports() {
                 wrapHeaders
               />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Price-distribution chart modal (Tier 3) ── */}
+      {chartOpen && (
+        <div onClick={() => setChartOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex',
+            alignItems: 'flex-start', justifyContent: 'center', padding: '3rem 1rem', zIndex: 1000, overflowY: 'auto' }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: '#fff', borderRadius: 8, boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+              width: '100%', maxWidth: 'min(960px, calc(100vw - 2rem))', boxSizing: 'border-box', padding: '1.25rem 1.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>Price Distribution — final prices across groups</h3>
+              <button onClick={() => setChartOpen(false)}
+                style={{ background: 'none', border: 'none', fontSize: '1.25rem', cursor: 'pointer', color: '#666' }}>✕</button>
+            </div>
+            <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: '#666' }}>
+              Each dot is a group&apos;s agreed price. Deals within 10% of a reservation price are flagged (amber);
+              walk-aways have no price and are listed below.
+            </p>
+            <PriceDistribution deals={deals} walkaways={walkaways}
+              reservationChris={reservations.chris} reservationKelly={reservations.kelly} />
           </div>
         </div>
       )}

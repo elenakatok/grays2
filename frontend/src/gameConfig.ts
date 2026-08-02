@@ -3,7 +3,7 @@ import { type OutcomeField, type OutcomeSchema } from '@mygames/game-engine/outc
 
 export type { RoleConfig, OutcomeField, OutcomeSchema }
 
-// Chris = seller (lead), Kelly = buyer. Keys are stable; content is Part 2/3.
+// Chris = seller (lead), Kelly = buyer.
 export const graysConfig: RoleConfig = {
   roles: [
     { key: 'chris', label: 'Chris', short: 'C' },
@@ -11,16 +11,14 @@ export const graysConfig: RoleConfig = {
   ],
 }
 
-// STUB outcome schema — mirrors functions/src/gameDefinition.ts. Part 3 replaces
-// the single price field with the real contract fields.
+// The negotiated outcome is a single agreed price (spec §2 Phase 2 Step 6). Mirrors
+// functions/src/gameDefinition.ts.
 export const graysSchema: OutcomeSchema = [
-  { key: 'price', type: 'integer', min: 0, max: 1_000_000 },
-  { key: 'notes', type: 'text' },  // optional free-text; blank = '', excluded from scoring
+  { key: 'price', type: 'integer', min: 0, max: 10_000_000 },
 ]
 
 export const FIELD_LABELS: Readonly<Record<string, string>> = {
-  price: 'Price',
-  notes: 'Notes',
+  price: 'Agreed price',
 }
 
 export function formatField(field: OutcomeField, value: unknown): string {

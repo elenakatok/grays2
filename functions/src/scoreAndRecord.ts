@@ -63,11 +63,20 @@ export const scoreAndRecord = onCall({ cors: def.corsOrigins, secrets: [classroo
     // ── Full recompute from CURRENT state — no guard, no precondition ──────────
     const groupsSnap = await instanceRef.collection('groups').get()
     const completedGroups = new Map<string, CompletedGroup>()
+    // Per-group metadata for the classroom `details` block (spec §5): the reconciled
+    // deal, and the composition string ("1C+1K", "2C+1K", …).
+    const groupMeta = new Map<string, { agreement: boolean; price: number | null; composition: string }>()
     for (const gdoc of groupsSnap.docs) {
       const d = gdoc.data()
-      completedGroups.set(gdoc.id, {
-        outcome: (d['outcome'] as Outcome | null) ?? null,
-        agreement_reached: Boolean(d['agreement_reached']),
+      const outcome = (d['outcome'] as Outcome | null) ?? null
+      const agreement = Boolean(d['agreement_reached'])
+      completedGroups.set(gdoc.id, { outcome, agreement_reached: agreement })
+      const nc = Array.isArray(d['chris_participants']) ? (d['chris_participants'] as string[]).length : 0
+      const nk = Array.isArray(d['kelly_participants']) ? (d['kelly_participants'] as string[]).length : 0
+      groupMeta.set(gdoc.id, {
+        agreement,
+        price: outcome ? ((outcome['price'] as number | undefined) ?? null) : null,
+        composition: `${nc}C+${nk}K`,
       })
     }
 
@@ -91,8 +100,32 @@ export const scoreAndRecord = onCall({ cors: def.corsOrigins, secrets: [classroo
     const recordMap = def.computeScoreBreakdown
       ? new Map(records.map(r => [r.participant_id, r]))
       : null
+    const pdataById = new Map(participantsSnap.docs.map(d => [d.id, d.data() as Record<string, unknown>]))
+    const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v)) ? v : null
 
-    // Write scores (overwrite each run).
+    // The classroom `details` block (Grays_com_Game_Specification_v1 §5) — pushed via
+    // toGameResult, which reads participant.details. Same shape the frozen game sent.
+    const detailsFor = (pid: string, surplus: number): Record<string, unknown> => {
+      const p = pdataById.get(pid) ?? {}
+      const gid = p['group_id'] as string | undefined
+      const gm = gid ? groupMeta.get(gid) : undefined
+      return {
+        display_name: ((p['display_name'] ?? p['name'] ?? '') as string) || pid.slice(0, 8),
+        agreement_reached: gm?.agreement ?? false,
+        final_price: gm?.price ?? null,
+        surplus,
+        debrief_initial_price: (typeof p['debrief_first_price'] === 'string' ? p['debrief_first_price'] : null),
+        group_id: gid ?? null,
+        group_composition: gm?.composition ?? null,
+        is_lead: p['is_lead'] === true,
+        prep_estimated_other_price: num(p['prep_estimated_other_price']),
+        prep_planned_first_offer: num(p['prep_planned_first_offer']),
+      }
+    }
+
+    // Write scores + the details block (overwrite each run). `details` is stored so
+    // toGameResult picks it up on the push; the computed map below also carries it.
+    const detailsById = new Map<string, Record<string, unknown>>()
     const now = FieldValue.serverTimestamp()
     const batch = db.batch()
     for (const f of finalized) {
@@ -100,11 +133,14 @@ export const scoreAndRecord = onCall({ cors: def.corsOrigins, secrets: [classroo
       const breakdown = (def.computeScoreBreakdown && rec)
         ? def.computeScoreBreakdown(rec.role, rec.outcome, configData)
         : null
+      const details = detailsFor(f.participant_id, f.raw_score ?? 0)
+      detailsById.set(f.participant_id, details)
       batch.update(instanceRef.collection('participants').doc(f.participant_id), {
         raw_score: f.raw_score,
         normalized_score: f.normalized_score,
         knowledge_check_score: f.knowledge_check_score,
         finalized_at: now,
+        details,
         ...(breakdown !== null ? { value_or_cost: breakdown.value_or_cost } : {}),
       })
     }
@@ -133,6 +169,7 @@ export const scoreAndRecord = onCall({ cors: def.corsOrigins, secrets: [classroo
         raw_score: f.raw_score,
         normalized_score: f.normalized_score,
         knowledge_check_score: f.knowledge_check_score,
+        details: detailsById.get(f.participant_id) ?? {},
       })
     }
     for (const pid of rolelessPids) {

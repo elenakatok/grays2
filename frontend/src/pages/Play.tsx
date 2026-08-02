@@ -22,7 +22,7 @@ import {
 import type { BootstrapArgs, InfoPageLink } from '@mygames/game-ui'
 import OutcomeReporting from '../phases/OutcomeReporting'
 import OnlineWaiting from '../phases/OnlineWaiting'
-import { graysConfig, graysSchema, FIELD_LABELS, formatField } from '../gameConfig'
+import { graysConfig, graysSchema, formatField } from '../gameConfig'
 
 // ── Phase state ───────────────────────────────────────────────────────────────
 
@@ -114,27 +114,24 @@ function formatGraysOutcome(
 ): React.ReactNode {
   if (!agreementReached || outcome == null) {
     return (
-      <p style={{ fontSize: '1.05rem', color: colors.textSecondary, marginBottom: layout.pagePad }}>
+      <p style={{ fontSize: '1.15rem', fontWeight: 600, color: colors.textSecondary, marginBottom: layout.pagePad }}>
         No deal reached.
       </p>
     )
   }
+  // Spec §3 Results: "Agreement at $287,500".
+  const priceField = graysSchema.find(f => f.key === 'price')!
   return (
     <div style={{
       background:   '#f0f7ff',
       border:       '1px solid #b3d4f5',
       borderRadius: '4px',
-      padding:      '0.75rem 1rem',
+      padding:      '0.9rem 1.1rem',
       marginBottom: layout.pagePad,
+      fontSize:     '1.15rem',
+      fontWeight:   600,
     }}>
-      {graysSchema.map(field => (
-        <div key={field.key} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0' }}>
-          <span style={{ color: colors.textSecondary, marginRight: '1rem' }}>
-            {FIELD_LABELS[field.key] ?? field.key}
-          </span>
-          <span>{formatField(field, outcome[field.key])}</span>
-        </div>
-      ))}
+      Agreement at {formatField(priceField, outcome['price'])}
     </div>
   )
 }
@@ -325,9 +322,12 @@ export default function Play() {
 
       {phase.name === 'confirmation' && (
         <main style={{ padding: layout.pagePad, maxWidth: layout.contentWidth, margin: '0 auto' }}>
-          <h1 style={{ marginTop: 0 }}>Ready to negotiate?</h1>
+          <h1 style={{ marginTop: 0 }}>Ready to play?</h1>
           <p style={{ lineHeight: 1.6, marginBottom: spacing.gapSm }}>
-            You&apos;ll be paired with another student for a face-to-face negotiation.
+            You&apos;ll be paired with another student for a face-to-face negotiation. If you
+            don&apos;t show up, your partner has nobody to negotiate with.
+          </p>
+          <p style={{ lineHeight: 1.6, marginBottom: spacing.gapSm }}>
             Only continue if you are in class and ready to negotiate right now.
           </p>
           {confError && (

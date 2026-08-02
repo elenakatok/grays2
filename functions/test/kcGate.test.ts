@@ -12,13 +12,21 @@ describe('grays 2.0 KC gate', () => {
     expect(err).toBeNull()
   })
 
-  it('has exactly 4 free-text questions → 4 Tier-2 report tiles', () => {
+  it('has exactly 4 free-text questions → 4 Tier-2 report tiles (3 prep + 1 debrief)', () => {
     const text = (graysGameDef.prepDefaults ?? []).filter(q => q.format === 'text' && !q.hidden)
     expect(text.map(q => q.field)).toEqual([
       'prep_first_topic',
-      'prep_question_other_side',
-      'prep_reason_for_number',
+      'prep_question_for_other',
+      'prep_planned_offer_reason',
       'debrief_first_price',
+    ])
+  })
+
+  it('has the two number prep questions (spec §2 Step 5, Q2 & Q4)', () => {
+    const nums = (graysGameDef.prepDefaults ?? []).filter(q => q.format === 'number')
+    expect(nums.map(q => q.field)).toEqual([
+      'prep_estimated_other_price',
+      'prep_planned_first_offer',
     ])
   })
 })

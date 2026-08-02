@@ -166,7 +166,7 @@ async function outcomeCase() {
   // Lead (chris) reports a deal.
   const lead = await post('/submitLeadOutcome', {
     _test: { participant_id: C1, game_instance_id: gameId },
-    outcome: { price: 150_000, notes: 'stub deal' },
+    outcome: { price: 150_000 },
   })
   ok('lead (chris) submits outcome', lead.ok === true)
   let g = (await db.collection('game_instances').doc(gameId).collection('groups').doc('grp1').get()).data()
@@ -189,8 +189,9 @@ async function outcomeCase() {
   // Verify per-role stub scoring landed (chris surplus 50k, kelly surplus 50k; z=0 each single-member pool).
   const cDoc = (await db.collection('game_instances').doc(gameId).collection('participants').doc(C1).get()).data()
   const kDoc = (await db.collection('game_instances').doc(gameId).collection('participants').doc(K1).get()).data()
-  ok('chris raw_score = price − reservation (50k)', cDoc.raw_score === 50_000)
-  ok('kelly raw_score = reservation − price (50k)', kDoc.raw_score === 50_000)
+  // Real reservations: Chris 25k, Kelly 475k. price 150k → Chris 125k, Kelly 325k.
+  ok('chris raw_score = price − 25k reservation (125k)', cDoc.raw_score === 125_000)
+  ok('kelly raw_score = 475k reservation − price (325k)', kDoc.raw_score === 325_000)
   ok('both finalized', cDoc.finalized_at != null && kDoc.finalized_at != null)
   console.log(`         push summary: ${JSON.stringify(score.push)} (classroom emulator not required for scoring)`)
 }

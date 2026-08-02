@@ -99,6 +99,9 @@ export const updateGroupContract = onCall({ cors: graysGameDef.corsOrigins }, as
         if (typeof val === 'string' && val.trim()) text_answers[field] = val.trim()
       }
 
+      // value_or_cost is still written to the doc (above); the report row exposes the
+      // surplus (raw_score) and carries the unchanged normalized/KC scores.
+      void value_or_cost
       rows.push({
         participant_id: pdoc.id,
         display_name,
@@ -106,10 +109,11 @@ export const updateGroupContract = onCall({ cors: graysGameDef.corsOrigins }, as
         group_id: groupId,
         role,
         price: outcome ? (outcome['price'] as number) : null,
-        value_or_cost,
-        raw_score,
+        agreement_reached,
+        surplus: raw_score,
+        normalized_score: (d['normalized_score'] ?? null) as number | null,
+        knowledge_check_score: (d['knowledge_check_score'] ?? null) as number | null,
         text_answers,
-        notes: outcome ? ((outcome['notes'] as string | undefined) ?? null) : null,
       })
     }
 
