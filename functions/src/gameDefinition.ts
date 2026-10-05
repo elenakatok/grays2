@@ -97,6 +97,10 @@ export const graysGameDef: GameDefinition = {
   corsOrigins: ['https://grays2.mygames.live'],
   classroom: { callbackSecretId: 'CLASSROOM_CALLBACK_SECRET' },
   isJoinable: negotiationIsJoinable,
+  // A student who enters the code AFTER matching is paired with a spare — the extra
+  // Chris/Kelly of a not-yet-started group of three — as their own new pair, rather
+  // than making a second group of three (the 2026-10-05 class).
+  latecomerPairsWithSpare: true,
 
   // Settings-page config fields.
   configFields: [

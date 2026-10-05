@@ -23,6 +23,9 @@ import { getGameConfig, setClockMode, groupParticipantsOnline, getRoster } from 
 const ROLE_LABELS: Record<string, string> = { chris: 'Chris', kelly: 'Kelly' }
 const ROLE_KEYS = Object.keys(ROLE_LABELS)
 
+// The shared dashboard's classroom-matching buttons, hidden while in online mode.
+const CLASSROOM_MATCH_BUTTONS = new Set(['Match Now', 'Matching…', 'Re-match'])
+
 type RosterGroup = { group_id: string; status: string; participants_by_role: Record<string, string[]> }
 
 const box: React.CSSProperties = {
@@ -67,7 +70,7 @@ export default function OnlineControls() {
     const apply = () => {
       for (const b of Array.from(document.querySelectorAll('button'))) {
         const t = (b.textContent ?? '').trim()
-        if (t === 'Match Now' || t === 'Matching…') (b as HTMLButtonElement).style.display = online ? 'none' : ''
+        if (CLASSROOM_MATCH_BUTTONS.has(t)) (b as HTMLButtonElement).style.display = online ? 'none' : ''
       }
     }
     apply()
@@ -75,7 +78,7 @@ export default function OnlineControls() {
     return () => { clearInterval(t); // restore on unmount
       for (const b of Array.from(document.querySelectorAll('button'))) {
         const txt = (b.textContent ?? '').trim()
-        if (txt === 'Match Now' || txt === 'Matching…') (b as HTMLButtonElement).style.display = ''
+        if (CLASSROOM_MATCH_BUTTONS.has(txt)) (b as HTMLButtonElement).style.display = ''
       } }
   }, [online])
 

@@ -5,6 +5,7 @@ import { auth, db, rtdb, functions } from '../firebase'
 import { assignRole, confirmReady, verifyAttendanceCode, recordLogin, CLASSROOM_URL } from '../api'
 import {
   useStudentSession,
+  useGroupFollow,
   KnowledgeCheck,
   InfoPage,
   PrepQuestions,
@@ -201,6 +202,18 @@ export default function Play() {
     void run()
     return () => { cancelled = true }
   }, [session])
+
+  // ── Follow a re-match / re-pairing while still on the group reveal ─────────
+  // Before a group starts the instructor can still re-match the class, and a late
+  // student can be paired with this one. Either changes this student's group under a
+  // page that is holding the old id. Off once the group has started (membership locks).
+  useGroupFollow(
+    db,
+    session.kind === 'ready' ? session.gameInstanceId : null,
+    session.kind === 'ready' ? session.participantId : null,
+    phase.name === 'group-reveal' ? phase.groupId : null,
+    (groupId) => setPhase(groupId ? { name: 'group-reveal', groupId } : { name: 'waiting-room' }),
+  )
 
   // ── Render: pre-session states (no header) ────────────────────────────────
 
@@ -409,6 +422,7 @@ export default function Play() {
 
       {phase.name === 'group-reveal' && (
         <GroupReveal
+          key={phase.groupId}
           groupId={phase.groupId}
           participantId={participantId}
           gameInstanceId={gameInstanceId}

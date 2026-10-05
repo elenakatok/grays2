@@ -154,6 +154,105 @@ async function rematchCase() {
   ok('same two students re-paired into a fresh group', bothPaired && second.groups[0].group_id !== firstGid)
 }
 
+// ── The 2026-10-05 matching fixes (game-server v0.30.0) ─────────────────────────
+// The live class: 5 Chris + 5 Kelly all entered the code, one Kelly's phone was
+// mid-reload at the click, and the class matched as 4 pairs + a group of three.
+async function matchingFixesCase() {
+  const rtdb = admin.database()
+  const inst = (gameId) => db.collection('game_instances').doc(gameId)
+  const counts = (groups) => groups.map(g => `${g.chris_participants.length}C+${g.kelly_participants.length}K`).sort().join(' ')
+
+  console.log('\n── CODE = MATCHED (a confirmed student who is not connected is still matched) ──')
+  const g1 = `fix_offline_${Date.now()}`
+  await post('/seedMatchTest', { game_instance_id: g1, participants: makeParticipants(5, 5) })
+  // k5's phone is mid-reload. The functions emulator writes RTDB under the
+  // `<project>-default-rtdb` namespace, this script's default app under `<project>`.
+  await rtdb.ref(`presence/${g1}/k5`).remove()
+  const fnRtdb = admin.initializeApp({ projectId: PROJECT, databaseURL: `http://localhost:9012?ns=${PROJECT}-default-rtdb` }, 'fn-ns').database()
+  await fnRtdb.ref(`presence/${g1}/k5`).remove()
+
+  const pv = await post('/triggerMatching', { _dev: { game_instance_id: g1 }, preview: true })
+  ok('preview ok and reports 10 confirmed (5 Chris, 5 Kelly)', pv.ok === true && pv.preview?.confirmed === 10 && pv.preview.by_role.chris === 5 && pv.preview.by_role.kelly === 5)
+  ok('preview: 5 complete groups, no extras', pv.preview?.groups === 5 && pv.preview.extras_by_role.chris === 0 && pv.preview.extras_by_role.kelly === 0)
+  ok('preview NAMES the not-connected student (k5)', pv.preview?.not_connected?.length === 1 && pv.preview.not_connected[0].participant_id === 'k5')
+  let st = await readGroupsAndParticipants(g1)
+  ok('preview wrote NOTHING (no groups, nobody assigned)', st.groups.length === 0 && st.participants.every(p => p.group_id == null))
+
+  const t = await post('/triggerMatching', { _dev: { game_instance_id: g1 } })
+  st = await readGroupsAndParticipants(g1)
+  ok('match → FIVE clean pairs (was 4 pairs + a three)', t.ok === true && st.groups.length === 5 && counts(st.groups) === '1C+1K 1C+1K 1C+1K 1C+1K 1C+1K')
+  ok('the not-connected student is in a group', st.participants.find(p => p.participant_id === 'k5')?.group_id != null)
+
+  console.log('\n── RE-MATCH (flag; only until the first group starts) ──')
+  const before = new Set(st.groups.map(g => g.group_id))
+  const rpv = await post('/triggerMatching', { _dev: { game_instance_id: g1 }, rematch: true, preview: true })
+  ok('re-match preview ok, still writes nothing', rpv.ok === true && rpv.preview?.groups === 5 &&
+    (await readGroupsAndParticipants(g1)).groups.every(g => before.has(g.group_id)))
+  const r1 = await post('/triggerMatching', { _dev: { game_instance_id: g1 }, rematch: true })
+  st = await readGroupsAndParticipants(g1)
+  ok('re-match → 5 NEW groups, old ones gone', r1.ok === true && st.groups.length === 5 && st.groups.every(g => !before.has(g.group_id)))
+  const gids = new Set(st.groups.map(g => g.group_id))
+  ok('every student points at a group that exists; exactly one lead per group',
+    st.participants.every(p => gids.has(p.group_id)) && st.participants.filter(p => p.is_lead).length === 5)
+  // one group starts → re-match is refused, nothing changes
+  await inst(g1).collection('groups').doc(st.groups[0].group_id).update({ status: 'negotiating' })
+  const r2 = await post('/triggerMatching', { _dev: { game_instance_id: g1 }, rematch: true })
+  const after = await readGroupsAndParticipants(g1)
+  ok(`re-match REFUSED once a group has started (${r2.ok === false ? r2.error : 'UNEXPECTED OK'})`, r2.ok === false)
+  ok('refused re-match left the groups untouched', after.groups.length === 5 && after.groups.every(g => gids.has(g.group_id)))
+
+  console.log('\n── RE-MATCH releases a student the new match cannot place ──')
+  const g3 = `fix_release_${Date.now()}`
+  await post('/seedMatchTest', { game_instance_id: g3, participants: makeParticipants(2, 2) })
+  await post('/triggerMatching', { _dev: { game_instance_id: g3 } })
+  // k2's code entry is withdrawn, so the re-match has 2 Chris + 1 Kelly to work with.
+  await inst(g3).collection('participants').doc('k2').update({ attendance_confirmed_at: null })
+  const r3 = await post('/triggerMatching', { _dev: { game_instance_id: g3 }, rematch: true })
+  st = await readGroupsAndParticipants(g3)
+  ok('re-match with one Kelly gone → one group 2C+1K', r3.ok === true && st.groups.length === 1 && counts(st.groups) === '2C+1K')
+  ok('the unplaced student is released (group_id null), not left on a deleted group', st.participants.find(p => p.participant_id === 'k2')?.group_id == null)
+
+  console.log('\n── LATE STUDENT pairs with the SPARE (code entered after matching) ──')
+  const g2 = `fix_late_${Date.now()}`
+  // 5 Chris + 4 Kelly entered the code; the 5th Kelly (k5) is in the room but has not.
+  await post('/seedMatchTest', { game_instance_id: g2, participants: makeParticipants(5, 5) })
+  await inst(g2).collection('participants').doc('k5').update({ attendance_confirmed_at: admin.firestore.FieldValue.delete() })
+  await inst(g2).collection('attendance_code').doc('current').set({ code: 'ABCDE' })
+  const m = await post('/triggerMatching', { _dev: { game_instance_id: g2 } })
+  st = await readGroupsAndParticipants(g2)
+  ok('5C+4K → 4 groups, one of them 2C+1K', m.ok === true && st.groups.length === 4 && counts(st.groups) === '1C+1K 1C+1K 1C+1K 2C+1K')
+  const three = st.groups.find(g => g.chris_participants.length === 2)
+  const spare = three.chris_participants.find(id => id !== three.lead_participant_id)
+
+  const v = await post('/verifyAttendanceCode', { _test: { participant_id: 'k5', game_instance_id: g2 }, code: 'ABCDE' })
+  st = await readGroupsAndParticipants(g2)
+  ok('late Kelly enters the code', v.ok === true)
+  ok('→ FIVE clean pairs; the group of three is a pair again', st.groups.length === 5 && counts(st.groups) === '1C+1K 1C+1K 1C+1K 1C+1K 1C+1K')
+  const k5 = st.participants.find(p => p.participant_id === 'k5')
+  const sp = st.participants.find(p => p.participant_id === spare)
+  const ng = st.groups.find(g => g.group_id === k5.group_id)
+  ok('the late Kelly and the spare Chris are in the SAME new group', k5.group_id != null && sp.group_id === k5.group_id && ng.chris_participants[0] === spare && ng.kelly_participants[0] === 'k5')
+  ok('the spare Chris leads the new pair; new group is "matched"', ng.lead_participant_id === spare && sp.is_lead === true && k5.is_lead === false && ng.status === 'matched')
+  const old = st.groups.find(g => g.group_id === three.group_id)
+  ok('the old group kept its lead and its Kelly', old.lead_participant_id === three.lead_participant_id && old.kelly_participants.length === 1)
+
+  console.log('\n── LATE STUDENT, but the group of three has already STARTED ──')
+  const g4 = `fix_late_started_${Date.now()}`
+  await post('/seedMatchTest', { game_instance_id: g4, participants: makeParticipants(3, 3) })
+  await inst(g4).collection('participants').doc('k3').update({ attendance_confirmed_at: admin.firestore.FieldValue.delete() })
+  await inst(g4).collection('attendance_code').doc('current').set({ code: 'ABCDE' })
+  await post('/triggerMatching', { _dev: { game_instance_id: g4 } })
+  st = await readGroupsAndParticipants(g4)
+  const three4 = st.groups.find(g => g.chris_participants.length === 2)
+  await inst(g4).collection('groups').doc(three4.group_id).update({ status: 'negotiating' })
+  await post('/verifyAttendanceCode', { _test: { participant_id: 'k3', game_instance_id: g4 }, code: 'ABCDE' })
+  st = await readGroupsAndParticipants(g4)
+  const started = st.groups.find(g => g.group_id === three4.group_id)
+  ok('the running group of three is untouched', started.chris_participants.length === 2 && started.kelly_participants.length === 1)
+  ok('the late Kelly joins the other, not-started group (ordinary placement)', st.groups.length === 2 &&
+    st.participants.find(p => p.participant_id === 'k3')?.group_id === st.groups.find(g => g.group_id !== three4.group_id).group_id)
+}
+
 async function outcomeCase() {
   console.log('\n── OUTCOME → FINALIZE + PUSH ──')
   const gameId = `outcome_${Date.now()}`
@@ -208,6 +307,7 @@ async function main() {
   await errorCase('1C+0K', 1, 0)
   await errorCase('0C+1K', 0, 1)
   await rematchCase()
+  await matchingFixesCase()
   await outcomeCase()
 
   console.log(`\n═══ ${passed}/${passed + failed} checks passed ═══\n`)
