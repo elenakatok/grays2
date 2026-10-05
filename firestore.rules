@@ -11,12 +11,18 @@ service cloud.firestore {
       // introduce new field names (e.g. prep_abc123) without a rules redeploy.
       // Protected fields (role, scores, group assignment, timestamps) may not
       // be touched by a direct client write; create and delete remain denied.
+      //
+      // ⚠ `debrief_initial_offer` is deliberately NOT protected (Elena, 2026-10-05). It
+      // was in the list inherited from grays-com, where a callable wrote it; in Grays 2.0
+      // it is a debrief ANSWER the student's own page writes. While it was protected, a
+      // debrief containing it was rejected WHOLE — reflection included — so the 10-05
+      // class saved no debrief answers and the regression report had no x-axis.
       allow update: if request.auth != null
         && request.auth.uid == participantId
         && !request.resource.data.diff(resource.data).affectedKeys()
              .hasAny(['role', 'group_id', 'raw_score', 'normalized_score',
                       'knowledge_check_score', 'knowledge_check_attempts',
-                      'prep_status', 'prep_completed_at', 'debrief_initial_offer',
+                      'prep_status', 'prep_completed_at',
                       'finalized_at', 'attendance_confirmed_at', 'confirmed_ready_at',
                       'is_lead', 'participant_id', 'game_instance_id', 'participant_late']);
     }
