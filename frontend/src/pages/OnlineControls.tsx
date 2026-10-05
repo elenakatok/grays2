@@ -163,8 +163,13 @@ export default function OnlineControls() {
         </div>
       )}
 
-      {/* The shared role-aware move/ungroup panel — online mode only (classroom Part 1 has none). */}
-      {online && (
+      {/* The shared role-aware move/ungroup panel. Online: always. Classroom: once Match Now
+          has formed groups — so a group can be repaired by hand BEFORE it starts, without
+          switching mode (2026-10-05: the mode switch was the only way to reach this panel,
+          and by then the group that needed fixing had started and locked). Not shown before
+          matching in classroom mode: placing students by hand there would create groups and
+          disable Match Now. */}
+      {(online || groups.length > 0) && (
         <GroupsControlPanel functions={functions} auth={auth} roleLabels={ROLE_LABELS} testId="grays2-groups" />
       )}
     </div>

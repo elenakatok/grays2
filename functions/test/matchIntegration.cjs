@@ -212,6 +212,13 @@ async function matchingFixesCase() {
   ok('re-match with one Kelly gone → one group 2C+1K', r3.ok === true && st.groups.length === 1 && counts(st.groups) === '2C+1K')
   ok('the unplaced student is released (group_id null), not left on a deleted group', st.participants.find(p => p.participant_id === 'k2')?.group_id == null)
 
+  console.log('\n── EXTRAS SPREAD (game-server v0.31.0): 7 Chris + 4 Kelly ──')
+  const g5 = `fix_spread_${Date.now()}`
+  await post('/seedMatchTest', { game_instance_id: g5, participants: makeParticipants(7, 4) })
+  await post('/triggerMatching', { _dev: { game_instance_id: g5 } })
+  st = await readGroupsAndParticipants(g5)
+  ok('three extra Chris go to three DIFFERENT pairs (2C+1K ×3, 1C+1K ×1)', counts(st.groups) === '1C+1K 2C+1K 2C+1K 2C+1K')
+
   console.log('\n── LATE STUDENT pairs with the SPARE (code entered after matching) ──')
   const g2 = `fix_late_${Date.now()}`
   // 5 Chris + 4 Kelly entered the code; the 5th Kelly (k5) is in the room but has not.
