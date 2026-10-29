@@ -363,13 +363,21 @@ const D_RP_PX = D_LP_PX + D_PPW + 108 + D_IML
 const D_STATS_Y = D_BL + 78
 
 interface PrepPanelData { n: number; min: number | null; max: number | null; mean: number | null; stdDev: number | null; bins: number[] }
-interface DualPrepData { chris: PrepPanelData; kelly: PrepPanelData; axisMin: number; axisMax: number; span: number; binWidth: number; numBins: number; cap: number; outliers: number }
+interface DualPrepData { chris: PrepPanelData; kelly: PrepPanelData; axisMin: number; axisMax: number; span: number; binWidth: number; numBins: number; cap: number; outliers: number; rescaled: number }
 
 function computeDualPrep(participants: ReportParticipant[], config: ChartConfig, field: PrepNumberField): DualPrepData {
-  const chrisVals = participants.filter(p => p.role === 'chris' && p[field] != null).map(p => p[field]!)
-  const kellyVals = participants.filter(p => p.role === 'kelly' && p[field] != null).map(p => p[field]!)
   const zopaMin = config.reservation_price_chris
   const zopaMax = config.reservation_price_kelly
+  // Every number in the case is in the tens or hundreds of thousands, so an answer under
+  // $1,000 was typed in thousands ("10" means $10,000). Read it that way, display only;
+  // the stored answer is untouched.
+  let rescaled = 0
+  const asDollars = (v: number) => {
+    if (v > 0 && v < 1_000) { rescaled++; return v * 1_000 }
+    return v
+  }
+  const chrisVals = participants.filter(p => p.role === 'chris' && p[field] != null).map(p => asDollars(p[field]!))
+  const kellyVals = participants.filter(p => p.role === 'kelly' && p[field] != null).map(p => asDollars(p[field]!))
   // One typo (e.g. $55,000,000) would otherwise stretch the shared axis and crush every
   // real answer into the first bar. Answers above the cap stay in N/Min/Max but are left
   // out of the bars and of Average/Std Dev; the chart says how many.
@@ -395,7 +403,7 @@ function computeDualPrep(participants: ReportParticipant[], config: ChartConfig,
     const variance = kept.reduce((a, b) => a + (b - mean) ** 2, 0) / kept.length
     return { n, min, max, mean, stdDev: Math.sqrt(variance), bins }
   }
-  return { chris: panel(chrisVals), kelly: panel(kellyVals), axisMin, axisMax, span, binWidth, numBins, cap, outliers }
+  return { chris: panel(chrisVals), kelly: panel(kellyVals), axisMin, axisMax, span, binWidth, numBins, cap, outliers, rescaled }
 }
 
 export function DualPrepHistSVG({ participants, config, field, title, svgRef }: {
@@ -490,11 +498,12 @@ export function DualPrepHistSVG({ participants, config, field, title, svgRef }: 
       <line x1={D_RP_PX} y1={D_BL + 50} x2={D_RP_PX + D_PPW} y2={D_BL + 50} stroke="#e5e7eb" strokeWidth={1} />
       <Panel plotX={xPxLeft} maxCount={maxCountC} panel={d.chris} roleLabel="Seller (Chris)" roleColor="#0369a1" chrisX={chrisFloorX(xPxLeft)} kellyX={kellyCeilX(xPxLeft)} />
       <Panel plotX={xPxRight} maxCount={maxCountK} panel={d.kelly} roleLabel="Buyer (Kelly)" roleColor="#0f766e" chrisX={chrisFloorX(xPxRight)} kellyX={kellyCeilX(xPxRight)} />
-      {d.outliers > 0 && (
-        <text x={DW / 2} y={D_STATS_Y + 58} textAnchor="middle" fontSize={13} fontStyle="italic" fill="#6b7280" fontFamily="sans-serif">
-          {d.outliers} answer{d.outliers === 1 ? '' : 's'} above {USD.format(d.cap)} (likely typos) not shown in the bars and left out of Average and Std Dev; Min, Max and N include them.
-        </text>
-      )}
+      {[
+        d.rescaled > 0 && `${d.rescaled} answer${d.rescaled === 1 ? '' : 's'} under $1,000 read as thousands (e.g. 10 → $10,000).`,
+        d.outliers > 0 && `${d.outliers} answer${d.outliers === 1 ? '' : 's'} above ${USD.format(d.cap)} (likely typos) not shown in the bars and left out of Average and Std Dev; Min, Max and N include them.`,
+      ].filter(Boolean).map((note, i) => (
+        <text key={i} x={DW / 2} y={D_STATS_Y + 52 + i * 20} textAnchor="middle" fontSize={13} fontStyle="italic" fill="#6b7280" fontFamily="sans-serif">{note}</text>
+      ))}
     </svg>
   )
 }

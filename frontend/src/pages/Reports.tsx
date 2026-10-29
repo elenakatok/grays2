@@ -24,7 +24,7 @@ import {
   type ChartConfig,
 } from '../components/NegotiationCharts'
 import { SchemaField, parseForm, type FormValues } from '../phases/OutcomeReporting'
-import { getOnlineReport, type OnlineReport } from '../api'
+import { getGameConfig, getOnlineReport, type OnlineReport } from '../api'
 import { type OutcomeSchema } from '../gameConfig'
 import type { ReactNode } from 'react'
 
@@ -265,7 +265,14 @@ export default function Reports() {
     return { deals, walkaways }
   })()
 
-  // Online assignment-status report (§6) — fetched on demand.
+  // Online assignment-status report (§6) — fetched on demand. Shown ONLY for online
+  // instances: in-class matching never writes arrived[], so on an in-class run the
+  // report wrongly announces a wiring gap, and the dashboard already shows the rest.
+  const [clockMode, setClockMode] = useState<string | null>(null)
+  useEffect(() => {
+    if (!sessionReady) return
+    getGameConfig().then(c => setClockMode(c.clock_mode ?? 'on')).catch(() => setClockMode('on'))
+  }, [sessionReady])
   const [onlineOpen,   setOnlineOpen]   = useState(false)
   const [onlineReport, setOnlineReport] = useState<OnlineReport | null>(null)
   const [onlineErr,    setOnlineErr]    = useState<string | null>(null)
@@ -390,7 +397,7 @@ export default function Reports() {
       actionLabel: 'Open ↗',
     },
     // Online (Part 2) — assignment-status report: who arrived, who was flagged, what was done.
-    {
+    ...(clockMode !== 'off' ? [] : [{
       id: 'assignment-status',
       title: 'Assignment Status — online (arrivals & flags)',
       preview: <span style={{ fontSize: '0.85rem', color: '#555' }}>
@@ -398,7 +405,7 @@ export default function Reports() {
       </span>,
       onOpen: openOnline,
       actionLabel: 'Open ↗',
-    },
+    }]),
   ]
 
   // ── Render ─────────────────────────────────────────────────────────────────
