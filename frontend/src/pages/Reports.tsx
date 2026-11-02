@@ -314,8 +314,8 @@ export default function Reports() {
       title: 'Regression — Final Price vs. Initial Offer',
       preview: !groups
         ? <span style={{ color: '#888', fontSize: '0.85rem' }}>{loading ? 'Loading…' : 'No data'}</span>
-        : <div style={{ pointerEvents: 'none' }}><ScatterPlotSVG groups={groups} /></div>,
-      onOpen: () => { if (groups) setBigChart({ title: 'Regression — Final Price vs. Initial Offer', content: <ScatterPlotSVG groups={groups} /> }) },
+        : <div style={{ pointerEvents: 'none' }}><ScatterPlotSVG groups={groups} config={chartConfig} /></div>,
+      onOpen: () => { if (groups) setBigChart({ title: 'Regression — Final Price vs. Initial Offer', content: <ScatterPlotSVG groups={groups} config={chartConfig} /> }) },
       disabled: !groups || groups.length === 0,
       actionLabel: 'Open ↗',
     },

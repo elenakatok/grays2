@@ -146,6 +146,8 @@ export default function Play() {
   const testGid = import.meta.env.DEV ? p.get('_gid') : null
 
   const [phase, setPhase]             = useState<GamePhase>({ name: 'loading' })
+  // Kept after the first route: in-page transitions (prep → next screen) need it too.
+  const [clockMode,   setClockMode]   = useState<string>('on')
   const [headerLinks, setHeaderLinks] = useState<InfoPageLink[] | null>(null)
   const [confError,   setConfError]   = useState<string | null>(null)
   const [confLoading, setConfLoading] = useState(false)
@@ -180,7 +182,11 @@ export default function Play() {
       // recordLogin stamps last_login_at and hands back clock_mode — the only way the
       // client learns online vs classroom (config/main is server-only readable).
       let clockMode = 'on'
-      try { clockMode = (await recordLogin({})).clock_mode } catch { /* default classroom */ }
+      try { clockMode = (await recordLogin({})).clock_mode }
+      catch {
+        try { clockMode = (await recordLogin({})).clock_mode } catch { /* default classroom */ }
+      }
+      if (!cancelled) setClockMode(clockMode)
       let p: GamePhase
       try {
         p = await routeToPhase(participantId, gameInstanceId, clockMode)
@@ -202,6 +208,17 @@ export default function Play() {
     void run()
     return () => { cancelled = true }
   }, [session])
+
+  // ── Online mode never shows the in-class screens ─────────────────────────
+  // Finishing prep used to hard-code the in-class "hold" screen, so an online student
+  // who did KC + prep in one sitting reached "Enter attendance code" until a refresh.
+  // Whatever route leads here, online mode goes to the online waiting room instead.
+  useEffect(() => {
+    if (clockMode !== 'off') return
+    if (phase.name === 'hold' || phase.name === 'confirmation' || phase.name === 'attendance-code') {
+      setPhase({ name: 'online-waiting' })
+    }
+  }, [clockMode, phase.name])
 
   // ── Follow a re-match / re-pairing while still on the group reveal ─────────
   // Before a group starts the instructor can still re-match the class, and a late
@@ -313,7 +330,7 @@ export default function Play() {
           gameInstanceId={gameInstanceId}
           functions={functions}
           db={db}
-          onComplete={() => setPhase({ name: 'hold' })}
+          onComplete={() => setPhase(clockMode === 'off' ? { name: 'online-waiting' } : { name: 'hold' })}
         />
       )}
 
