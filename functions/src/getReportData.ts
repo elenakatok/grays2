@@ -80,6 +80,9 @@ export type ReportGroup = {
   final_price: number | null
   /** Average of the group members' parsed `debrief_initial_offer` (regression x-axis). */
   group_initial_price: number | null
+  /** Each member's parsed `debrief_initial_offer`, unaveraged, so the report can set a
+   *  typo aside per answer instead of letting it drag the partner's answer. */
+  member_initial_offers: number[]
   chris_participants: string[]
   kelly_participants: string[]
 }
@@ -205,6 +208,7 @@ export const getReportData = onCall({ cors: graysGameDef.corsOrigins }, async (r
         agreement_reached: agreement,
         final_price: outcome ? (outcome['price'] as number) : null,
         group_initial_price,
+        member_initial_offers: memberOffers,
         chris_participants: chris,
         kelly_participants: kelly,
       }

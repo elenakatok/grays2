@@ -23,6 +23,8 @@ export type ReportGroup = {
   agreement_reached: boolean | null
   final_price: number | null
   group_initial_price: number | null
+  /** Unaveraged member answers. Optional so an older functions deploy still renders. */
+  member_initial_offers?: number[]
   chris_participants: string[]
   kelly_participants: string[]
 }
@@ -210,16 +212,36 @@ interface RegData {
   n: number; canFit: boolean
   a: number | null; b: number | null; r2: number | null
   axisMinX: number; axisMaxX: number; axisMinY: number; axisMaxY: number
+  cap: number; outliers: number; rescaled: number
 }
 
-function computeRegression(groups: ReportGroup[]): RegData {
-  const points = groups
-    .filter(g => g.status === 'completed' && g.agreement_reached === true && g.final_price != null && g.group_initial_price != null)
-    .map(g => ({ x: g.group_initial_price!, y: g.final_price! }))
+export function computeRegression(groups: ReportGroup[], config: ChartConfig): RegData {
+  // Same reading rule as the prep charts: an answer under $1,000 was typed in thousands,
+  // and an answer above 2x the buyer's ceiling is a typo. Applied to EACH member's answer
+  // before averaging, so one typo neither stretches the axis nor drags the partner's
+  // answer. Stored answers are untouched; the chart says how many were set aside.
+  const cap = config.reservation_price_kelly * 2
+  let outliers = 0, rescaled = 0
+  const points: { x: number; y: number }[] = []
+  for (const g of groups) {
+    const y = g.final_price
+    if (g.status !== 'completed' || g.agreement_reached !== true || y == null) continue
+    const raw = g.member_initial_offers ?? (g.group_initial_price != null ? [g.group_initial_price] : [])
+    const kept: number[] = []
+    for (const v0 of raw) {
+      let v = v0
+      if (v > 0 && v < 1_000) { rescaled++; v = v * 1_000 }
+      if (v > cap) { outliers++; continue }
+      kept.push(v)
+    }
+    if (kept.length === 0) continue
+    points.push({ x: Math.round(kept.reduce((a, b) => a + b, 0) / kept.length), y })
+  }
   const n = points.length
+  const notes = { cap, outliers, rescaled }
 
   if (n === 0) {
-    return { points, n, canFit: false, a: null, b: null, r2: null, axisMinX: 0, axisMaxX: 500_000, axisMinY: 0, axisMaxY: 500_000 }
+    return { points, n, canFit: false, a: null, b: null, r2: null, axisMinX: 0, axisMaxX: 500_000, axisMinY: 0, axisMaxY: 500_000, ...notes }
   }
   const xs = points.map(p => p.x), ys = points.map(p => p.y)
   const pad = (arr: number[]) => {
@@ -233,23 +255,23 @@ function computeRegression(groups: ReportGroup[]): RegData {
   const ssX = xs.reduce((s, v) => s + (v - xBar) ** 2, 0)
 
   if (n < 3 || ssX < 1) {
-    return { points, n, canFit: false, a: null, b: null, r2: null, axisMinX: rx.lo, axisMaxX: rx.hi, axisMinY: ry.lo, axisMaxY: ry.hi }
+    return { points, n, canFit: false, a: null, b: null, r2: null, axisMinX: rx.lo, axisMaxX: rx.hi, axisMinY: ry.lo, axisMaxY: ry.hi, ...notes }
   }
   const ssXY = points.reduce((s, p) => s + (p.x - xBar) * (p.y - yBar), 0)
   const ssY = ys.reduce((s, v) => s + (v - yBar) ** 2, 0)
   const b = ssXY / ssX
   const a = yBar - b * xBar
   const r2 = ssY > 0 ? (ssXY ** 2) / (ssX * ssY) : 0
-  return { points, n, canFit: true, a, b, r2, axisMinX: rx.lo, axisMaxX: rx.hi, axisMinY: ry.lo, axisMaxY: ry.hi }
+  return { points, n, canFit: true, a, b, r2, axisMinX: rx.lo, axisMaxX: rx.hi, axisMinY: ry.lo, axisMaxY: ry.hi, ...notes }
 }
 
-const SW = 1280, SH = 680
-const SM = { top: 68, right: 70, bottom: 150, left: 116 }
+const SW = 1280, SH = 720
+const SM = { top: 68, right: 70, bottom: 190, left: 116 }
 const SPW = SW - SM.left - SM.right
 const SPH = SH - SM.top - SM.bottom
 
-export function ScatterPlotSVG({ groups, svgRef }: { groups: ReportGroup[]; svgRef?: RefObject<SVGSVGElement | null> }) {
-  const r = computeRegression(groups)
+export function ScatterPlotSVG({ groups, config, svgRef }: { groups: ReportGroup[]; config: ChartConfig; svgRef?: RefObject<SVGSVGElement | null> }) {
+  const r = computeRegression(groups, config)
   const spanX = r.axisMaxX - r.axisMinX || 1
   const spanY = r.axisMaxY - r.axisMinY || 1
   const xPx = (v: number) => SM.left + ((v - r.axisMinX) / spanX) * SPW
@@ -346,6 +368,12 @@ export function ScatterPlotSVG({ groups, svgRef }: { groups: ReportGroup[]; svgR
           Need at least 3 groups with both a deal and a numeric opening offer to fit a line.
         </text>
       )}
+      {[
+        r.rescaled > 0 && `${r.rescaled} answer${r.rescaled === 1 ? '' : 's'} under $1,000 read as thousands (e.g. 150 → $150,000).`,
+        r.outliers > 0 && `${r.outliers} answer${r.outliers === 1 ? '' : 's'} above ${USD.format(r.cap)} (likely typos) left out of the points and the fit.`,
+      ].filter(Boolean).map((note, i) => (
+        <text key={`note-${i}`} x={SM.left + SPW / 2} y={statsY + 76 + i * 20} textAnchor="middle" fontSize={13} fontStyle="italic" fill="#6b7280" fontFamily="sans-serif">{note}</text>
+      ))}
     </svg>
   )
 }
@@ -363,14 +391,28 @@ const D_RP_PX = D_LP_PX + D_PPW + 108 + D_IML
 const D_STATS_Y = D_BL + 78
 
 interface PrepPanelData { n: number; min: number | null; max: number | null; mean: number | null; stdDev: number | null; bins: number[] }
-interface DualPrepData { chris: PrepPanelData; kelly: PrepPanelData; axisMin: number; axisMax: number; span: number; binWidth: number; numBins: number }
+interface DualPrepData { chris: PrepPanelData; kelly: PrepPanelData; axisMin: number; axisMax: number; span: number; binWidth: number; numBins: number; cap: number; outliers: number; rescaled: number }
 
 function computeDualPrep(participants: ReportParticipant[], config: ChartConfig, field: PrepNumberField): DualPrepData {
-  const chrisVals = participants.filter(p => p.role === 'chris' && p[field] != null).map(p => p[field]!)
-  const kellyVals = participants.filter(p => p.role === 'kelly' && p[field] != null).map(p => p[field]!)
-  const all = [...chrisVals, ...kellyVals]
   const zopaMin = config.reservation_price_chris
   const zopaMax = config.reservation_price_kelly
+  // Every number in the case is in the tens or hundreds of thousands, so an answer under
+  // $1,000 was typed in thousands ("10" means $10,000). Read it that way, display only;
+  // the stored answer is untouched.
+  let rescaled = 0
+  const asDollars = (v: number) => {
+    if (v > 0 && v < 1_000) { rescaled++; return v * 1_000 }
+    return v
+  }
+  const chrisVals = participants.filter(p => p.role === 'chris' && p[field] != null).map(p => asDollars(p[field]!))
+  const kellyVals = participants.filter(p => p.role === 'kelly' && p[field] != null).map(p => asDollars(p[field]!))
+  // One typo (e.g. $55,000,000) would otherwise stretch the shared axis and crush every
+  // real answer into the first bar. Answers above the cap stay in N/Min/Max but are left
+  // out of the bars and of Average/Std Dev; the chart says how many.
+  const cap = zopaMax * 2
+  const inRange = (v: number) => v <= cap
+  const all = [...chrisVals, ...kellyVals].filter(inRange)
+  const outliers = chrisVals.length + kellyVals.length - all.length
   const axisMin = all.length > 0 ? Math.min(zopaMin, ...all) : zopaMin
   const axisMax = all.length > 0 ? Math.max(zopaMax, ...all) : zopaMax
   const span = Math.max(axisMax - axisMin, 1)
@@ -380,14 +422,16 @@ function computeDualPrep(participants: ReportParticipant[], config: ChartConfig,
   function panel(vals: number[]): PrepPanelData {
     const n = vals.length
     const bins = Array<number>(numBins).fill(0)
-    vals.forEach(v => { const i = Math.min(Math.floor((v - axisMin) / binWidth), numBins - 1); bins[i]++ })
+    const kept = vals.filter(inRange)
+    kept.forEach(v => { const i = Math.min(Math.floor((v - axisMin) / binWidth), numBins - 1); bins[i]++ })
     if (n === 0) return { n, min: null, max: null, mean: null, stdDev: null, bins }
     const min = Math.min(...vals), max = Math.max(...vals)
-    const mean = vals.reduce((a, b) => a + b, 0) / n
-    const variance = vals.reduce((a, b) => a + (b - mean) ** 2, 0) / n
+    if (kept.length === 0) return { n, min, max, mean: null, stdDev: null, bins }
+    const mean = kept.reduce((a, b) => a + b, 0) / kept.length
+    const variance = kept.reduce((a, b) => a + (b - mean) ** 2, 0) / kept.length
     return { n, min, max, mean, stdDev: Math.sqrt(variance), bins }
   }
-  return { chris: panel(chrisVals), kelly: panel(kellyVals), axisMin, axisMax, span, binWidth, numBins }
+  return { chris: panel(chrisVals), kelly: panel(kellyVals), axisMin, axisMax, span, binWidth, numBins, cap, outliers, rescaled }
 }
 
 export function DualPrepHistSVG({ participants, config, field, title, svgRef }: {
@@ -482,6 +526,12 @@ export function DualPrepHistSVG({ participants, config, field, title, svgRef }: 
       <line x1={D_RP_PX} y1={D_BL + 50} x2={D_RP_PX + D_PPW} y2={D_BL + 50} stroke="#e5e7eb" strokeWidth={1} />
       <Panel plotX={xPxLeft} maxCount={maxCountC} panel={d.chris} roleLabel="Seller (Chris)" roleColor="#0369a1" chrisX={chrisFloorX(xPxLeft)} kellyX={kellyCeilX(xPxLeft)} />
       <Panel plotX={xPxRight} maxCount={maxCountK} panel={d.kelly} roleLabel="Buyer (Kelly)" roleColor="#0f766e" chrisX={chrisFloorX(xPxRight)} kellyX={kellyCeilX(xPxRight)} />
+      {[
+        d.rescaled > 0 && `${d.rescaled} answer${d.rescaled === 1 ? '' : 's'} under $1,000 read as thousands (e.g. 10 → $10,000).`,
+        d.outliers > 0 && `${d.outliers} answer${d.outliers === 1 ? '' : 's'} above ${USD.format(d.cap)} (likely typos) not shown in the bars and left out of Average and Std Dev; Min, Max and N include them.`,
+      ].filter(Boolean).map((note, i) => (
+        <text key={i} x={DW / 2} y={D_STATS_Y + 52 + i * 20} textAnchor="middle" fontSize={13} fontStyle="italic" fill="#6b7280" fontFamily="sans-serif">{note}</text>
+      ))}
     </svg>
   )
 }
